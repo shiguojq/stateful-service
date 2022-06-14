@@ -1,0 +1,16 @@
+domain: shiguojq.com
+layout:
+- go.kubebuilder.io/v3
+projectName: microsvc-controller
+repo: stateful-service
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: shiguojq.com
+  group: msc
+  kind: MicroService
+  path: stateful-service/api/v1
+  version: v1
+version: "3"
