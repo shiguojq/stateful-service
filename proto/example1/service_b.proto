@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+option go_package = "./proto/example1";
+
+package example1;
+
+message StoreNumRequest {
+int32 num = 1;
+    }
+
+message StoreNumReponse {
+  int32 result = 1;
+}

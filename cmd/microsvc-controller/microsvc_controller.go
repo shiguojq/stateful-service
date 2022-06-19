@@ -78,10 +78,15 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.MicroServiceReconciler{
+	msr := &controllers.MicroServiceReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
+		Log:    ctrl.Log.WithName("MicroSerivceReconciler"),
+	}
+
+	// checkpointController := controllers.NewCheckpointController(msr)
+
+	if err = msr.SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "MicroService")
 		os.Exit(1)
 	}
@@ -97,6 +102,7 @@ func main() {
 	}
 
 	setupLog.Info("starting manager")
+	// checkpointController.Start()
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		setupLog.Error(err, "problem running manager")
 		os.Exit(1)

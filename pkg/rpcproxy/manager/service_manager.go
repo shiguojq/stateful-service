@@ -1,16 +1,18 @@
 package manager
 
 import (
+	"fmt"
+	"github.com/golang/protobuf/proto"
 	"reflect"
+	pb "stateful-service/proto"
 	"stateful-service/slog"
 	"stateful-service/utils"
 	"sync/atomic"
 )
 
 type ServiceManager interface {
-	RegisterService(rcvr interface{}, inputCh chan ReqMsg) error
-	RegisterMethod(serviceName string, methodName string) error
-	RegisterMethods(serviceName string, methodNames ...string) error
+	RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn func(svcName string) map[string]interface{}) error
+	RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc) error
 }
 
 type serviceManager struct {
@@ -23,7 +25,7 @@ func NewServiceManager() ServiceManager {
 	return manager
 }
 
-func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg) error {
+func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn func(svcName string) map[string]interface{}) error {
 	receiver := reflect.ValueOf(rcvr)
 	if receiver.Kind() != reflect.Ptr {
 		slog.Errorf("[rpcProxy.manager.serviceManager.RegisterService]: receiver expected kind %v, actual kind %v", reflect.Ptr, receiver.Kind())
@@ -38,19 +40,19 @@ func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg) 
 			typ:               reflect.TypeOf(rcvr),
 			rcvr:              receiver,
 			inputCh:           inputCh,
-			registeredMethods: make(map[string]reflect.Method),
+			checkpointFn:      fn,
+			checkpointCh:      make(chan string, 1),
+			receivedMethod:    utils.NewStringSet(),
+			methodSet:         utils.NewStringSet(),
+			registeredMethods: make(map[string]*RpcMethod),
 		}
 	}
 	slog.Infof("[rpcProxy.manager.serviceManager.RegisterService]: register [%v] service successfully", serviceName)
 	return nil
 }
 
-func (m *serviceManager) RegisterMethod(serviceName string, methodName string) error {
-	return m.RegisteredServices[serviceName].registerMethod(methodName)
-}
-
-func (m *serviceManager) RegisterMethods(serviceName string, methodNames ...string) error {
-	return m.RegisteredServices[serviceName].registerMethods(methodNames...)
+func (m *serviceManager) RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc) error {
+	return m.RegisteredServices[serviceName].registerMethod(methodName, fn)
 }
 
 func (m *serviceManager) RunService(serviceName string) error {
@@ -70,8 +72,11 @@ type service struct {
 	rcvr              reflect.Value
 	inputCh           chan ReqMsg
 	running           int32
-	registeredMethods map[string]reflect.Method
-	methodCh          map[string]chan ReqMsg
+	checkpointFn      func(svcName string) map[string]interface{}
+	methodSet         utils.StringSet
+	checkpointCh      chan string
+	receivedMethod    utils.StringSet
+	registeredMethods map[string]*RpcMethod
 }
 
 func (svc *service) isRunning() bool {
@@ -85,72 +90,133 @@ func (svc *service) run() {
 	defer func() {
 		atomic.StoreInt32(&svc.running, 1) // maybe not available
 	}()
-	for methodName, ch := range svc.methodCh {
-		svc.Process(methodName, svc.registeredMethods[methodName], ch)
+	for _, method := range svc.registeredMethods {
+		go method.StartProcess(svc.name)
 	}
 	go func() {
 		for msg := range svc.inputCh {
 			methodName := msg.MethodName
-			svc.methodCh[methodName] <- msg
-
+			svc.registeredMethods[methodName].InputCh <- msg
 		}
 	}()
+	go svc.waitCheckpoint()
 }
 
-func (svc *service) registerMethod(methodName string) error {
-	method, ok := svc.typ.MethodByName(methodName)
-	if !ok {
-		return &ErrMethodNotFound{
-			clsName:    svc.name,
-			methodName: methodName,
+func (svc *service) waitCheckpoint() {
+	for methodName := range svc.checkpointCh {
+		if svc.receivedMethod.Has(methodName) {
+			continue
+		}
+		svc.receivedMethod.Insert(methodName)
+		if svc.receivedMethod.Len() == svc.methodSet.Len() {
+			checkpoint := svc.checkpointFn(svc.name)
+			slog.Infof("service %s take checkpoint successfully, checkpoint content: %v", svc.name, checkpoint)
+			svc.receivedMethod = utils.NewStringSet()
 		}
 	}
-	if _, ok := svc.registeredMethods[methodName]; ok {
+}
+
+func (svc *service) registerMethod(methodName string, fn RpcMethodFunc) error {
+	if svc.methodSet.Has(methodName) {
 		return nil
 	}
-	svc.registeredMethods[methodName] = method
-	svc.methodCh[methodName] = make(chan ReqMsg, 1024) // add channel buffer to avoid overhead
+	svc.methodSet.Insert(methodName)
+	inputCh := make(chan ReqMsg, 1024)
+	outputCh := make(chan proto.Message, 1)
+	svc.registeredMethods[methodName] = &RpcMethod{
+		Name:          methodName,
+		Fn:            fn,
+		InputCh:       inputCh,
+		OutputCh:      outputCh,
+		CheckpointCh:  svc.checkpointCh,
+		ClientManager: NewClientManager(outputCh),
+		SourceSet:     utils.NewStringSet(),
+		TargetSet:     utils.NewStringSet(),
+		BarrierSet:    utils.NewStringSet(),
+	}
 	slog.Infof("[rpcProxy.manager.service.registerMethod]: service [%v] register method [%v] successfully", svc.name, methodName)
 	return nil
 }
 
-func (svc *service) registerMethods(methodNames ...string) error {
-	for _, methodName := range methodNames {
-		err := svc.registerMethod(methodName)
-		if err != nil {
-			return err
-		}
-	}
-	slog.Infof("[rpcProxy.manager.service.registerMethod]: service [%v] register method %v successfully", svc.name, methodNames)
-	return nil
+type RpcMethodFunc func(arg MethodArgs) MethodResult
+
+type RpcMethod struct {
+	Name          string
+	Fn            RpcMethodFunc
+	InputCh       chan ReqMsg
+	OutputCh      chan proto.Message
+	ClientManager ClientManager
+	SourceSet     utils.StringSet
+	TargetSet     utils.StringSet
+	BarrierSet    utils.StringSet
+	CheckpointCh  chan string
 }
 
-func (svc *service) Process(methodName string, method reflect.Method, inputCh chan ReqMsg) {
-	for reqMsg := range inputCh {
-		replyMsg := ReplyMsg{}
+func (method *RpcMethod) StartProcess(serviceName string) {
+	for reqMsg := range method.InputCh {
+		switch reqMsg.Type {
+		case AsyncReq:
+			source := reqMsg.Source
+			if !method.SourceSet.Has(source) {
+				method.SourceSet.Insert(source)
+			}
+			args := MethodArgs{}
 
-		reqType := method.Type.In(1).Elem()
-		req := reflect.New(reqType)
-		if err := utils.Unmarshal(reqMsg.Args, req); err != nil {
-			replyMsg.Ok = false
-			reqMsg.ReplyCh <- replyMsg
-			continue
+			if err := utils.Unmarshal(reqMsg.Args, args.Message); err != nil {
+				continue
+			}
+
+			result := method.Fn(args)
+
+			data, err := utils.Marshal(result.Message)
+			if err != nil {
+				slog.Errorf("marshal message %v failed, err: %v", result.Message, err)
+				continue
+			}
+			if result.IsRequest {
+				req := &pb.AsyncCallRequest{
+					Id:     reqMsg.Id,
+					Msg:    data,
+					Source: fmt.Sprintf("%s.%s", serviceName, method.Name),
+				}
+				if result.Target != "" {
+					req.Target = result.Target
+					req.Callback = result.Callback
+				} else {
+					req.Target = reqMsg.Callback
+					req.Callback = ""
+				}
+
+				if !method.TargetSet.Has(req.Target) {
+					method.TargetSet.Insert(req.Target)
+				}
+
+				method.OutputCh <- req
+			} else {
+				replyMsg := ReplyMsg{
+					Ok:    true,
+					Reply: data,
+				}
+				reqMsg.ReplyCh <- replyMsg
+			}
+		case CheckpointReq:
+			source := reqMsg.Source
+			if !method.BarrierSet.Has(source) {
+				method.BarrierSet.Insert(source)
+			}
+
+			if method.BarrierSet.Equals(method.SourceSet) {
+				for target := range method.TargetSet {
+					req := &pb.InitCheckpointRequest{
+						Source: fmt.Sprintf("%s.%s", serviceName, method.Name),
+						Target: target,
+					}
+					method.OutputCh <- req
+				}
+				method.CheckpointCh <- method.Name
+			}
+		case RestoreReq:
 		}
 
-		replyType := method.Type.In(2).Elem()
-		reply := reflect.New(replyType)
-
-		function := method.Func
-		function.Call([]reflect.Value{svc.rcvr, req.Elem(), reply})
-
-		data, err := utils.Marshal(reply)
-		if err != nil {
-			replyMsg.Ok = false
-			reqMsg.ReplyCh <- replyMsg
-			continue
-		}
-		replyMsg.Ok = true
-		replyMsg.Reply = data
-		reqMsg.ReplyCh <- replyMsg
 	}
 }

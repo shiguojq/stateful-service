@@ -9,6 +9,10 @@ func NewStringSet(items ...string) StringSet {
 	return ss
 }
 
+func (s StringSet) Len() int {
+	return len(s)
+}
+
 func (s StringSet) Insert(items ...string) StringSet {
 	for _, item := range items {
 		s[item] = Empty{}
@@ -27,4 +31,16 @@ func (s StringSet) List() []string {
 		res = append(res, key)
 	}
 	return res
+}
+
+func (s StringSet) Equals(obj StringSet) bool {
+	if s.Len() != obj.Len() {
+		return false
+	}
+	for item := range s {
+		if !obj.Has(item) {
+			return false
+		}
+	}
+	return true
 }

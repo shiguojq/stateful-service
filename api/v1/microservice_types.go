@@ -32,10 +32,9 @@ type MicroServiceSpec struct {
 
 	// Foo is an example field of MicroService. Edit microservice_types.go to remove/update
 	Image      string      `json:"image"`
-	Upstream   string      `json:"upstream,omitempty"`
-	Downstream string      `json:"downstream,omitempty"`
 	Config     []v1.EnvVar `json:"config,omitempty"`
 	Port       int32       `json:"port,omitempty"`
+	StartPoint bool        `json:"startPoint,omitempty"`
 }
 
 // MicroServiceStatus defines the observed state of MicroService
@@ -58,12 +57,11 @@ type MicroService struct {
 }
 
 func (ms *MicroService) String() string {
-	return fmt.Sprintf("Image [%s], Port [%d], Configs [%s], Upstream [%s], Downstream [%s], PodName [%s]",
+	return fmt.Sprintf("Image [%s], Port [%d], Configs [%s], StartPoint [%v], PodName [%s]",
 		ms.Spec.Image,
 		ms.Spec.Port,
 		ms.Spec.Config,
-		ms.Spec.Upstream,
-		ms.Spec.Downstream,
+		ms.Spec.StartPoint,
 		ms.Status.PodName)
 }
 

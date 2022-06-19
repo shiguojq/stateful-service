@@ -4,18 +4,72 @@ option go_package = "./proto";
 
 package proto;
 
-message RpcMsgRequest {
-  string  id = 1;
-  string  svc_meth = 2;
-  bytes   msg = 3;
+message AsyncCallRequest {
+  int64   id = 1;
+  string  source = 2;
+  string  target = 3;
+  int32   seq = 4;
+  string  callback = 5;
+  bytes   msg = 6;
 }
 
-message RpcMsgResponse {
-  string  id = 1;
-  bool    ok = 2;
+message AsyncCallResponse {
+  int64  id = 1;
+  bool   ok = 2;
 }
 
-service RpcServer {
-  rpc HandleRequest(RpcMsgRequest) returns (RpcMsgResponse) {}
-  rpc HandleResponse(RpcMsgRequest) returns (RpcMsgResponse) {}
+message InitSyncCallRequest {
+  string target = 1;
+  bytes  msg = 2;
+}
+
+message InitSyncCallResponse {
+  bool   ok = 1;
+  int64  id = 2;
+}
+
+message SyncCallRequest {
+  int64  id = 1;
+}
+
+message SyncCallResponse {
+  bool   ok = 1;
+  bytes  msg = 2;
+}
+
+message InitCheckpointRequest {
+  string source = 1;
+  string target = 2;
+}
+
+message InitCheckpointResponse {
+  int64 id = 1;
+  bool  ok = 2;
+}
+
+message WaitCheckpointRequest {
+  int64 id = 1;
+}
+
+message WaitCheckpointResponse {
+  bool ok = 1;
+}
+
+message SendBarrierRequest {
+  int64  id = 1;
+  string source = 2;
+  string target = 3;
+}
+
+message SendBarrierResponse {
+  bool ok = 1;
+}
+
+service RpcProxy {
+  rpc AsyncCall (AsyncCallRequest) returns (AsyncCallResponse) {}
+  rpc InitSyncCall (InitSyncCallRequest) returns (InitSyncCallResponse) {}
+  rpc SyncCall (SyncCallRequest) returns (SyncCallResponse) {}
+  rpc InitCheckpoint (InitCheckpointRequest) returns (InitCheckpointResponse) {}
+  rpc WaitCheckpoint (WaitCheckpointRequest) returns (WaitCheckpointResponse) {}
+  rpc SendBarrier (SendBarrierRequest) returns (SendBarrierResponse) {}
 }

@@ -10,7 +10,7 @@ type StateManager interface {
 	RegisterState(rcvr interface{}) error
 	RegisterField(stateName string, fieldName string) error
 	RegisterFields(stateName string, fieldNames ...string) error
-	Checkpoint() map[string]interface{}
+	Checkpoint(svcName string) map[string]interface{}
 	Restore(fieldValues map[string]interface{})
 }
 
@@ -53,11 +53,9 @@ func (m *stateManager) RegisterFields(stateName string, names ...string) error {
 	return m.RegisteredStates[stateName].registerFields(names...)
 }
 
-func (m *stateManager) Checkpoint() map[string]interface{} {
+func (m *stateManager) Checkpoint(svcName string) map[string]interface{} {
 	result := make(map[string]interface{})
-	for svcName, svcState := range m.RegisteredStates {
-		result[svcName] = svcState.checkpoint()
-	}
+	result[svcName] = m.RegisteredStates[svcName].checkpoint()
 	return result
 }
 

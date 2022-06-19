@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+option go_package = "./proto/example1";
+
+package example1;
+
+message AddNumRequest {
+  int32 num = 1;
+}
+
+message AddNumReponse {
+  int32 result = 1;
+}
+
+
+

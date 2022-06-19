@@ -1,0 +1,6 @@
+apiVersion: msc.shiguojq.com/v1
+kind: MicroService
+metadata:
+  name: microservice-sample
+spec:
+  # TODO(user): Add fields here

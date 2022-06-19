@@ -43,7 +43,7 @@ type MicroServiceReconciler struct {
 //+kubebuilder:rbac:groups=msc.shiguojq.com,resources=microservices,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=msc.shiguojq.com,resources=microservices/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=msc.shiguojq.com,resources=microservices/finalizers,verbs=update
-//+kubebuilder:rbac:groups=core,resource=pod,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=core,resources=pods,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -111,7 +111,7 @@ func (r *MicroServiceReconciler) createPod(ctx context.Context, microSvc *mscv1.
 			},
 		},
 		Spec: v1.PodSpec{
-			Affinity: &v1.Affinity{
+			/*Affinity: &v1.Affinity{
 				PodAffinity: &v1.PodAffinity{
 					PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{
 						{
@@ -132,7 +132,7 @@ func (r *MicroServiceReconciler) createPod(ctx context.Context, microSvc *mscv1.
 						},
 					},
 				},
-			},
+			},*/
 			Containers: []v1.Container{
 				{
 					Name:            microSvc.Name,

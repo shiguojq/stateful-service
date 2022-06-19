@@ -9,7 +9,10 @@ import (
 )
 
 const (
-	EnvRunningPort = "RUNNING_PORT"
+	EnvRunningPort         = "RUNNING_PORT"
+	EnvIdGeneratorHost     = "ID_GENERATOR_HOST"
+	EnvCheckpointInterval  = "CHECKPOINT_INTERVAL"
+	ControllerSourceString = "CONTROLLER"
 )
 
 func GetIp() (net.IP, int32) {
