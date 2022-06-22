@@ -6,12 +6,14 @@ import (
 	"stateful-service/utils"
 )
 
+type CheckpointFn func(svcName string) map[string]reflect.Value
+
 type StateManager interface {
 	RegisterState(rcvr interface{}) error
 	RegisterField(stateName string, fieldName string) error
 	RegisterFields(stateName string, fieldNames ...string) error
-	Checkpoint(svcName string) map[string]interface{}
-	Restore(fieldValues map[string]interface{})
+	Checkpoint(svcName string) map[string]reflect.Value
+	Restore(fieldValues map[string]map[string]reflect.Value)
 }
 
 type stateManager struct {
@@ -32,12 +34,13 @@ func (m *stateManager) RegisterState(rcvr interface{}) error {
 			kind: receiver.Kind(),
 		}
 	}
-	stateName := reflect.TypeOf(rcvr).Name()
+	stateName := reflect.TypeOf(rcvr).Elem().Name()
+	slog.Infof("[rpcProxy.manager.stateManager.RegisterState]: try to register state %v", stateName)
 	if _, ok := m.RegisteredStates[stateName]; !ok {
 		m.RegisteredStates[stateName] = &state{
 			name:             stateName,
 			typ:              reflect.TypeOf(rcvr),
-			rcvr:             receiver,
+			rcvr:             receiver.Elem(),
 			registeredFields: utils.NewStringSet(),
 		}
 	}
@@ -53,15 +56,13 @@ func (m *stateManager) RegisterFields(stateName string, names ...string) error {
 	return m.RegisteredStates[stateName].registerFields(names...)
 }
 
-func (m *stateManager) Checkpoint(svcName string) map[string]interface{} {
-	result := make(map[string]interface{})
-	result[svcName] = m.RegisteredStates[svcName].checkpoint()
-	return result
+func (m *stateManager) Checkpoint(svcName string) map[string]reflect.Value {
+	return m.RegisteredStates[svcName].checkpoint()
 }
 
-func (m *stateManager) Restore(stateValues map[string]interface{}) {
+func (m *stateManager) Restore(stateValues map[string]map[string]reflect.Value) {
 	for stateName, stateValue := range stateValues {
-		m.RegisteredStates[stateName].restore(stateValue.(map[string]reflect.Value))
+		m.RegisteredStates[stateName].restore(stateValue)
 	}
 }
 
@@ -74,7 +75,7 @@ type state struct {
 
 func (st *state) registerField(fieldName string) error {
 	field := st.rcvr.FieldByName(fieldName)
-	if field.IsZero() {
+	if !field.IsValid() {
 		return &ErrFieldNotFound{
 			clsName:   st.name,
 			fieldName: fieldName,
@@ -91,9 +92,10 @@ func (st *state) registerField(fieldName string) error {
 }
 
 func (st *state) registerFields(fieldNames ...string) error {
+	slog.Infof("[rpcProxy.manager.state.registerField]: state[%v] try to register fields %v", st.name, fieldNames)
 	for _, fieldName := range fieldNames {
 		field := st.rcvr.FieldByName(fieldName)
-		if field.IsZero() {
+		if !field.IsValid() {
 			return &ErrFieldNotFound{
 				clsName:   st.name,
 				fieldName: fieldName,
@@ -116,7 +118,7 @@ func (st *state) checkpoint() map[string]reflect.Value {
 		value := st.rcvr.FieldByName(fieldName)
 		fieldValues[fieldName] = value
 	}
-	slog.Debugf("[rpcProxy.manager.state.checkpoint]: state [%v] checkpoint successfully, field values = [%v]", st.name, fieldValues)
+	slog.Infof("[rpcProxy.manager.state.checkpoint]: state [%v] checkpoint successfully, field values = [%v]", st.name, fieldValues)
 	return fieldValues
 }
 

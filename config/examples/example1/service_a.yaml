@@ -1,0 +1,13 @@
+apiVersion: msc.shiguojq.com/v1
+kind: MicroService
+metadata:
+  name: servicea
+  namespace: microsvc-controller-system
+spec:
+  image: example1-servicea:latest
+  config:
+    - name: "ID_GENERATOR_HOST"
+      value: "microsvc-controller-idgenerator:8080"
+  port: 8080
+  startPoint: false
+

@@ -4,43 +4,53 @@ import (
 	"context"
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
-	"stateful-service/config"
-	pb "stateful-service/proto"
+	pb "stateful-service/proto/pb"
 	"stateful-service/slog"
 	"strings"
+	"time"
 )
 
 type ClientManager interface {
 }
 
 type clientManager struct {
-	Ch      chan proto.Message
-	Clients map[string]pb.RpcProxyClient
+	Name  string
+	Ch    chan proto.Message
+	Conns map[string]*grpc.ClientConn
 }
 
-func NewClientManager(ch chan proto.Message) ClientManager {
+func NewClientManager(svcMeth string, ch chan proto.Message) ClientManager {
 	mCli := &clientManager{}
+	mCli.Name = svcMeth
 	mCli.Ch = ch
+	mCli.Conns = make(map[string]*grpc.ClientConn)
 	go func() {
-		for req := range ch {
+		slog.Infof("[ClientManager: %v] start process", mCli.Name)
+		for req := range mCli.Ch {
 			switch req.(type) {
-
 			case *pb.AsyncCallRequest:
 				{
 					asyncReq := req.(*pb.AsyncCallRequest)
+					slog.Infof("[ClientManager: %v] start handle AsyncCallRequest: %+v", mCli.Name, asyncReq)
 					dot := strings.LastIndex(asyncReq.Target, ".")
 					if dot == -1 {
 						continue
 					}
 					serviceName := asyncReq.Target[:dot]
-					client, err := mCli.GetClient(serviceName)
+					conn, err := mCli.GetConn(asyncReq.TargetHost)
 					if err != nil {
 						continue
 					}
-					_, err = client.AsyncCall(context.Background(), asyncReq)
+					client := pb.NewRpcProxyClient(conn)
+
+					ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+					defer cancel()
+
+					_, err = client.AsyncCall(ctx, asyncReq)
 					if err != nil {
-						slog.Errorf("call service %v failed, err: %v", serviceName, err.Error())
+						slog.Errorf("call host %v, service %v failed, err: %v", asyncReq.TargetHost, serviceName, err.Error())
 					}
+					slog.Infof("[ClientManager: %v] source %v asynccall target %v success", mCli.Name, asyncReq.Source, asyncReq.Target)
 				}
 
 			case *pb.InitCheckpointRequest:
@@ -51,14 +61,20 @@ func NewClientManager(ch chan proto.Message) ClientManager {
 						continue
 					}
 					serviceName := checkpointReq.Target[:dot]
-					client, err := mCli.GetClient(serviceName)
+					conn, err := mCli.GetConn(checkpointReq.TargetHost)
 					if err != nil {
 						continue
 					}
-					_, err = client.InitCheckpoint(context.Background(), checkpointReq)
+					client := pb.NewRpcProxyClient(conn)
+
+					ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+					defer cancel()
+
+					_, err = client.InitCheckpoint(ctx, checkpointReq)
 					if err != nil {
 						slog.Errorf("call service %v failed, err: %v", serviceName, err.Error())
 					}
+					slog.Infof("[ClientManager: %v] source %v initCheckpoint target %v success", mCli.Name, checkpointReq.Source, checkpointReq.Target)
 				}
 			}
 		}
@@ -66,20 +82,22 @@ func NewClientManager(ch chan proto.Message) ClientManager {
 	return mCli
 }
 
-func (mCli *clientManager) GetClient(serviceName string) (pb.RpcProxyClient, error) {
-	if _, ok := mCli.Clients[serviceName]; !ok {
+func (mCli *clientManager) GetConn(hostname string) (*grpc.ClientConn, error) {
+	if _, ok := mCli.Conns[hostname]; !ok {
 		opts := []grpc.DialOption{
 			grpc.WithWriteBufferSize(512 * 1024 * 1024),
 			grpc.WithReadBufferSize(512 * 1024 * 1024),
+			grpc.WithInsecure(),
 		}
 
-		target := serviceName + ":" + config.GetStringEnv(config.EnvRunningPort)
+		target := hostname
 		conn, err := grpc.Dial(target, opts...)
 		if err != nil {
-			slog.Errorf("connect to service %s failed, err: %v", serviceName, err.Error())
+			slog.Errorf("[ClientManager: %v] connect to service %s failed, err: %v", mCli.Name, hostname, err.Error())
 			return nil, err
 		}
-		mCli.Clients[serviceName] = pb.NewRpcProxyClient(conn)
+		slog.Infof("[ClientManager: %v] connect to service %s success", mCli.Name, hostname)
+		mCli.Conns[hostname] = conn
 	}
-	return mCli.Clients[serviceName], nil
+	return mCli.Conns[hostname], nil
 }

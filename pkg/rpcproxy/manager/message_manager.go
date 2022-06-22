@@ -44,10 +44,11 @@ type ReqMsg struct {
 	Id         int64
 	Type       int
 	MethodName string
-	Args       []byte
 	Source     string
+	SourceHost string
 	ReplyCh    chan ReplyMsg
 	Callback   string
+	Args       []byte
 }
 
 type ReplyMsg struct {

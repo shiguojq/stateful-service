@@ -4,6 +4,10 @@ IMG ?= controller:latest
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
+ID_GENERATOR_IMG ?= idgenerator:latest
+EXAMPLE1_SERVICE_A_IMG ?= example1-servicea:latest
+EXAMPLE1_SERVICE_B_IMG ?= example1-serviceb:latest
+
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
 GOBIN=$(shell go env GOPATH)/bin
@@ -37,6 +41,14 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+.PHONY: cal
+cal: ## Calculate code lines
+	gocloc --not-match-d="api|proto" .
+
+.PHONY: clean
+clean: ## Clean none image
+	docker image ls |grep none|awk '{print $$3}'|xargs docker rmi
+
 ##@ Development
 
 .PHONY: manifests
@@ -47,7 +59,6 @@ manifests: controller-gen ## Generate WebhookConfiguration, ClusterRole and Cust
 generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
 	$(CONTROLLER_GEN) object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 	protoc --proto_path=. --go_out=. --go-grpc_out=. proto/*.proto
-	protoc --proto_path=. --go_out=. proto/example1/*.proto
 
 .PHONY: fmt
 fmt: ## Run go fmt against code.
@@ -80,12 +91,19 @@ run-id-generator: fmt vet ## Run id generator.
 	go run ./cmd/idgenerator/id_generator.go
 
 .PHONY: docker-build
-docker-build: generate fmt vet ## Build docker image with the manager.
-	docker build -t ${IMG} -f ./build/dockerfiles/Dockerfile .
+docker-build: generate fmt vet ## Build docker image with the manager|idgenerator.
+	docker build -t ${IMG} -f ./build/dockerfiles/microservice-controller/Dockerfile .
+	docker build -t ${ID_GENERATOR_IMG} -f ./build/dockerfiles/idgenerator/Dockerfile .
+
+.PHONY: docker-build-example1
+docker-build-example1: fmt vet ## Build docker image with the manager|idgenerator.
+	docker build -t ${EXAMPLE1_SERVICE_A_IMG} -f ./build/dockerfiles/example1/servicea/Dockerfile .
+	docker build -t ${EXAMPLE1_SERVICE_B_IMG} -f ./build/dockerfiles/example1/serviceb/Dockerfile .
 
 .PHONY: docker-push
 docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
+	docker push ${ID_GENERATOR_IMG}
 
 ##@ Deployment
 
@@ -103,12 +121,20 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG} idgenerator=${ID_GENERATOR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
+
+.PHONY: deploy-example1
+deploy-example1:
+	cd config/examples/example1 && kubectl apply -f .
 
 .PHONY: undeploy
 undeploy: ## Undeploy controller from the K8s cluster specified in ~/.kube/config. Call with ignore-not-found=true to ignore resource not found errors during deletion.
 	$(KUSTOMIZE) build config/default | kubectl delete --ignore-not-found=$(ignore-not-found) -f -
+
+.PHONY: undeploy-example1
+undeploy-example1:
+	cd config/examples/example1 && kubectl delete -f .
 
 ##@ Build Dependencies
 

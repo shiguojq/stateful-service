@@ -4,7 +4,7 @@
 // - protoc             (unknown)
 // source: proto/rpc_proxy.proto
 
-package proto
+package pb
 
 import (
 	context "context"

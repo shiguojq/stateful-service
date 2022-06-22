@@ -4,7 +4,7 @@
 // - protoc             (unknown)
 // source: proto/id_generator.proto
 
-package proto
+package pb
 
 import (
 	context "context"

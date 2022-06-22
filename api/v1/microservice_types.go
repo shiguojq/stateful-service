@@ -41,7 +41,8 @@ type MicroServiceSpec struct {
 type MicroServiceStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	PodName string `json:"podName,omitempty"`
+	PodName     string `json:"podName,omitempty"`
+	ServiceName string `json:"serviceName,omitempty"`
 }
 
 //+kubebuilder:object:root=true

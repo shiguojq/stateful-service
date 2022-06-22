@@ -7,7 +7,7 @@ import (
 	"net"
 	"stateful-service/config"
 	"stateful-service/pkg/idgenerator"
-	pb "stateful-service/proto"
+	pb "stateful-service/proto/pb"
 	"stateful-service/slog"
 )
 

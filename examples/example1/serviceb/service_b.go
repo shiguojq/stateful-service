@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"github.com/golang/protobuf/proto"
 	"stateful-service/pkg/rpcproxy"
 	"stateful-service/pkg/rpcproxy/manager"
 	"stateful-service/proto/example1"
@@ -17,17 +18,29 @@ type ServiceB struct {
 func (s *ServiceB) StoreNum(args manager.MethodArgs) manager.MethodResult {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	req := args.Message.(*example1.StoreNumRequest)
+	req := &example1.StoreNumRequest{}
+	if err := proto.Unmarshal(args.Message, req); err != nil {
+		slog.Errorf("[ServiceB] unmarshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	slog.Infof("[ServiceB] start handle StoreNumReq %+v", req)
 	s.Number = req.Num
 	storeResp := &example1.StoreNumReponse{
 		Result: s.Number,
 	}
+	data, err := proto.Marshal(storeResp)
+	if err != nil {
+		slog.Errorf("[ServiceB] marshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	result := manager.MethodResult{
-		Message:   storeResp,
-		IsRequest: false,
-		Callback:  "",
-		Target:    "",
+		Message:    data,
+		IsRequest:  true,
+		Callback:   "",
+		Target:     "ServiceB.StoreNumCallback",
+		TargetHost: "serviceb:8080",
 	}
 	slog.Infof("[ServiceB] handle StoreNumReq %+v finish, result: %v", req, result)
 	return result
@@ -36,15 +49,26 @@ func (s *ServiceB) StoreNum(args manager.MethodArgs) manager.MethodResult {
 func (s *ServiceB) StoreNumCallback(args manager.MethodArgs) manager.MethodResult {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	req := args.Message.(*example1.StoreNumReponse)
+	req := &example1.StoreNumReponse{}
+	if err := proto.Unmarshal(args.Message, req); err != nil {
+		slog.Errorf("[ServiceB] unmarshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	slog.Infof("[ServiceB] start handle StoreNumCallbackReq %+v", req)
 	s.Number++
 	storeResp := &example1.StoreNumReponse{
 		Result: s.Number,
 	}
+	data, err := proto.Marshal(storeResp)
+	if err != nil {
+		slog.Errorf("[ServiceB] marshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	result := manager.MethodResult{
-		Message:   storeResp,
-		IsRequest: false,
+		Message:   data,
+		IsRequest: true,
 	}
 	slog.Infof("[ServiceB] handle StoreNumCallbackReq %+v finish, result: %v", req, result)
 	return result
@@ -55,7 +79,7 @@ var (
 )
 
 func init() {
-	flag.IntVar(&port, "port", 80, "server listen port")
+	flag.IntVar(&port, "port", 8080, "server listen port")
 }
 
 func main() {
@@ -63,8 +87,8 @@ func main() {
 	proxy := rpcproxy.NewProxy("ServiceB", port)
 	slog.Infof("[ServiceB] create new proxy: %v, running port: %v", "ServiceB", port)
 	svc := &ServiceB{
-		Number:  0,
-		mutex:   sync.Mutex{},
+		Number: 0,
+		mutex:  sync.Mutex{},
 	}
 	if err := proxy.RegisterService(svc); err != nil {
 		slog.Errorf("[ServiceB] register service failed, err: %v", err)

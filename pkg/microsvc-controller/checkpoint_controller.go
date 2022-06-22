@@ -6,7 +6,7 @@ import (
 	"google.golang.org/grpc"
 	v1 "stateful-service/api/v1"
 	"stateful-service/config"
-	pb "stateful-service/proto"
+	pb "stateful-service/proto/pb"
 	"strings"
 	"sync"
 	"sync/atomic"

@@ -4,39 +4,45 @@ import (
 	"context"
 	"errors"
 	"google.golang.org/grpc"
-	pb "stateful-service/proto"
+	pb "stateful-service/proto/pb"
+	"stateful-service/slog"
+	"time"
 )
 
 type RpcClient interface {
 	CallRpc(target string, req []byte) ([]byte, error)
+	Close()
 }
 
 type rpcClient struct {
-	client pb.RpcProxyClient
+	conn *grpc.ClientConn
 }
 
-func NewRpcClient(target string) (RpcClient, error) {
+func NewRpcClient(hostport string) (RpcClient, error) {
 	cli := &rpcClient{}
 	opts := []grpc.DialOption{
 		grpc.WithWriteBufferSize(512 * 1024 * 1024),
 		grpc.WithReadBufferSize(512 * 1024 * 1024),
+		grpc.WithInsecure(),
 	}
 
-	conn, err := grpc.Dial(target, opts...)
+	var err error
+	cli.conn, err = grpc.Dial(hostport, opts...)
 	if err != nil {
 		return nil, err
 	}
-	cli.client = pb.NewRpcProxyClient(conn)
+
 	return cli, nil
 }
 
 func (c *rpcClient) CallRpc(target string, req []byte) ([]byte, error) {
 	initReq := &pb.InitSyncCallRequest{
-		Target:  target,
-		Msg:     req,
+		Target: target,
+		Msg:    req,
 	}
 
-	initResp, err := c.client.InitSyncCall(context.Background(), initReq)
+	client := pb.NewRpcProxyClient(c.conn)
+	initResp, err := client.InitSyncCall(context.Background(), initReq)
 	if err != nil {
 		return nil, err
 	}
@@ -45,9 +51,14 @@ func (c *rpcClient) CallRpc(target string, req []byte) ([]byte, error) {
 	}
 
 	callReq := &pb.SyncCallRequest{
-		Id:  initResp.Id,
+		Id: initResp.Id,
 	}
-	callResp, err := c.client.SyncCall(context.Background(), callReq)
+	slog.Infof("start wait req %v complete", initResp.Id)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
+	defer cancel()
+
+	callResp, err := client.SyncCall(ctx, callReq)
 	if err != nil {
 		return nil, err
 	}
@@ -56,4 +67,8 @@ func (c *rpcClient) CallRpc(target string, req []byte) ([]byte, error) {
 	}
 
 	return callResp.Msg, nil
+}
+
+func (c *rpcClient) Close() {
+	c.conn.Close()
 }

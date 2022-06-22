@@ -3,7 +3,8 @@ package idgenerator
 import (
 	"context"
 	"stateful-service/config"
-	pb "stateful-service/proto"
+	pb "stateful-service/proto/pb"
+	"stateful-service/slog"
 	"stateful-service/utils"
 	"time"
 )
@@ -57,11 +58,13 @@ func (gen *IdGenerator) GenerateId(_ context.Context, req *pb.GenerateIdRequest)
 	id := ((timestamp & TIMESTAMP_MASK) << TIMESTAMP_LEFT_SHIFT) | (((int64(gen.podIp) >> POD_IP_RIGHT_SHIFT) & POD_IP_MASK) << POD_IP_LEFT_SHIFT) | gen.sequence
 	resp := &pb.GenerateIdResponse{
 		Id: id,
+		Ok: true,
 	}
 	if _, ok := gen.svcNames[req.SvcName]; !ok {
 		gen.svcNames.Insert(req.SvcName)
 		//Todo(jiayk) report new direct call to controller
 	}
+	slog.Infof("[IdGenerator] generate uuid: %v", resp.Id)
 	return resp, nil
 }
 

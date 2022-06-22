@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+option go_package = "./proto/pb";
+
+package proto;
+
+message CommonRequest {
+}
+
+message CommonResponse {
+}

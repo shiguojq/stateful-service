@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-option go_package = "./proto";
+option go_package = "./proto/pb";
 
 package proto;
 
@@ -8,9 +8,11 @@ message AsyncCallRequest {
   int64   id = 1;
   string  source = 2;
   string  target = 3;
-  int32   seq = 4;
-  string  callback = 5;
-  bytes   msg = 6;
+  string  source_host = 4;
+  string  target_host = 5;
+  int32   seq = 6;
+  string  callback = 7;
+  bytes   msg = 8;
 }
 
 message AsyncCallResponse {
@@ -39,7 +41,9 @@ message SyncCallResponse {
 
 message InitCheckpointRequest {
   string source = 1;
-  string target = 2;
+  string source_host = 2;
+  string target = 3;
+  string target_host = 4;
 }
 
 message InitCheckpointResponse {

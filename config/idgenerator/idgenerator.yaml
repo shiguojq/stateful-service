@@ -1,0 +1,37 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: idgenerator
+  namespace: system
+spec:
+  ports:
+    - port: 8080
+      targetPort: 8080
+  selector:
+    app: idgenerator
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: idgenerator-daemonset
+  namespace: system
+  labels:
+    app: idgenerator
+spec:
+  selector:
+    matchLabels:
+      app: idgenerator
+  template:
+    metadata:
+      labels:
+        app: idgenerator
+    spec:
+      containers:
+        - name: idgenerator
+          image: idgenerator:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: "RUNNING_PORT"
+              value: "8080"

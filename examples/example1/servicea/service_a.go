@@ -2,6 +2,7 @@ package main
 
 import (
 	"flag"
+	"github.com/golang/protobuf/proto"
 	"stateful-service/pkg/rpcproxy"
 	"stateful-service/pkg/rpcproxy/manager"
 	"stateful-service/proto/example1"
@@ -17,36 +18,60 @@ type ServiceA struct {
 func (s *ServiceA) AddNum(args manager.MethodArgs) manager.MethodResult {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	req := args.Message.(*example1.AddNumRequest)
+	req := &example1.AddNumRequest{}
+	if err := proto.Unmarshal(args.Message, req); err != nil {
+		slog.Errorf("[ServiceA] unmarshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
 	slog.Infof("[ServiceA] start handle AddNumReq %+v", req)
 	s.Number += req.Num
 	storeReq := &example1.StoreNumRequest{
 		Num: s.Number,
 	}
-	result := manager.MethodResult{
-		Message:   storeReq,
-		IsRequest: true,
-		Callback:  "AddNumCallback",
-		Target:    "",
+
+	data, err := proto.Marshal(storeReq)
+	if err != nil {
+		slog.Errorf("[ServiceA] marshal message failed, err: %v", err)
+		return manager.MethodResult{}
 	}
-	slog.Infof("[ServiceA] handle AddNumReq %+v finish, result: %v", req, result)
+
+	result := manager.MethodResult{
+		Message:    data,
+		IsRequest:  true,
+		Callback:   "ServiceA.AddNumCallback",
+		Target:     "ServiceB.StoreNum",
+		TargetHost: "serviceb:8080",
+	}
+	slog.Infof("[ServiceA] handle AddNumReq %+v finish, result: %+v", req, result)
 	return result
 }
 
 func (s *ServiceA) AddNumCallback(args manager.MethodArgs) manager.MethodResult {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	req := args.Message.(*example1.StoreNumReponse)
+	req := &example1.StoreNumReponse{}
+	if err := proto.Unmarshal(args.Message, req); err != nil {
+		slog.Errorf("[ServiceA] unmarshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	slog.Infof("[ServiceA] start handle AddNumCallbackReq %+v", req)
 	s.Number++
 	addResp := &example1.AddNumReponse{
 		Result: req.Result,
 	}
+
+	data, err := proto.Marshal(addResp)
+	if err != nil {
+		slog.Errorf("[ServiceA] marshal message failed, err: %v", err)
+		return manager.MethodResult{}
+	}
+
 	result := manager.MethodResult{
-		Message:   addResp,
+		Message:   data,
 		IsRequest: false,
 	}
-	slog.Infof("[ServiceA] handle AddNumCallbackReq %+v finish, result: %v", req, result)
+	slog.Infof("[ServiceA] handle AddNumCallbackReq %+v finish, result: %+v", req, result)
 	return result
 }
 
@@ -55,16 +80,16 @@ var (
 )
 
 func init() {
-	flag.IntVar(&port, "port", 80, "server listen port")
+	flag.IntVar(&port, "port", 8080, "server listen port")
 }
 
 func main() {
 	flag.Parse()
-	proxy := rpcproxy.NewProxy("ServiceA", port)
+	proxy := rpcproxy.NewProxy("servicea", port)
 	slog.Infof("[ServiceA] create new proxy: %v, running port: %v", "ServiceA", port)
 	svc := &ServiceA{
-		Number:  0,
-		mutex:   sync.Mutex{},
+		Number: 0,
+		mutex:  sync.Mutex{},
 	}
 	if err := proxy.RegisterService(svc); err != nil {
 		slog.Errorf("[ServiceA] register service failed, err: %v", err)
