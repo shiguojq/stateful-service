@@ -37,6 +37,10 @@ func (s StringSet) Equals(obj StringSet) bool {
 	if s.Len() != obj.Len() {
 		return false
 	}
+	return s.Less(obj)
+}
+
+func (s StringSet) Less(obj StringSet) bool {
 	for item := range s {
 		if !obj.Has(item) {
 			return false

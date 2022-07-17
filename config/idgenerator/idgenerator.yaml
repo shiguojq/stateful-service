@@ -35,3 +35,12 @@ spec:
           env:
             - name: "RUNNING_PORT"
               value: "8080"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                      - jyk1

@@ -13,6 +13,7 @@ const (
 	EnvIdGeneratorHost     = "ID_GENERATOR_HOST"
 	EnvCheckpointInterval  = "CHECKPOINT_INTERVAL"
 	ControllerSourceString = "CONTROLLER"
+	EnvCheckpointMode      = "CHECKPOINT_MODE"
 )
 
 func GetIp() (net.IP, int32) {

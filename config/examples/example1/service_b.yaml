@@ -4,10 +4,12 @@ metadata:
   name: serviceb
   namespace: microsvc-controller-system
 spec:
-  image: example1-serviceb:latest
+  image: harbor.act.buaa.edu.cn/jiayuke/example1-serviceb:v0.1.0
   config:
     - name: "ID_GENERATOR_HOST"
       value: "microsvc-controller-idgenerator:8080"
+    - name: "CHECKPOINT_MODE"
+      value: "1"
   port: 8080
   startPoint: false
 

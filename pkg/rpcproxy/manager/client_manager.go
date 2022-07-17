@@ -70,11 +70,15 @@ func NewClientManager(svcMeth string, ch chan proto.Message) ClientManager {
 					ctx, cancel := context.WithTimeout(context.Background(), 100*time.Second)
 					defer cancel()
 
-					_, err = client.InitCheckpoint(ctx, checkpointReq)
+					resp, err := client.InitCheckpoint(ctx, checkpointReq)
 					if err != nil {
 						slog.Errorf("call service %v failed, err: %v", serviceName, err.Error())
 					}
-					slog.Infof("[ClientManager: %v] source %v initCheckpoint target %v success", mCli.Name, checkpointReq.Source, checkpointReq.Target)
+					if !resp.Ok {
+						slog.Errorf("[CLientManager: %v] source %v initCheckpoint target %v failed, err: unkown", mCli.Name, checkpointReq.Source, checkpointReq.Target)
+					} else {
+						slog.Infof("[ClientManager: %v] source %v initCheckpoint target %v success", mCli.Name, checkpointReq.Source, checkpointReq.Target)
+					}
 				}
 			}
 		}

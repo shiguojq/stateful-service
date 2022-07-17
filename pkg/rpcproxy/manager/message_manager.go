@@ -1,10 +1,13 @@
 package manager
 
+type MessageType int
+
 const (
-	AsyncReq = iota
+	AsyncReq MessageType = iota
 	SyncReq
 	CheckpointReq
 	RestoreReq
+	BlockReq
 )
 
 type MessageManager interface {
@@ -42,7 +45,7 @@ func (m *messageManager) DeleteMessage(id int64) {
 
 type ReqMsg struct {
 	Id         int64
-	Type       int
+	Type       MessageType
 	MethodName string
 	Source     string
 	SourceHost string

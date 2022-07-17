@@ -1,12 +1,12 @@
 
 # Image URL to use all building/pushing image targets
-IMG ?= controller:latest
+IMG ?= harbor.act.buaa.edu.cn/jiayuke/microservice-controller:v0.1.1
 # ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
 ENVTEST_K8S_VERSION = 1.23
 
-ID_GENERATOR_IMG ?= idgenerator:latest
-EXAMPLE1_SERVICE_A_IMG ?= example1-servicea:latest
-EXAMPLE1_SERVICE_B_IMG ?= example1-serviceb:latest
+ID_GENERATOR_IMG ?= harbor.act.buaa.edu.cn/jiayuke/idgenerator:v0.1.0
+EXAMPLE1_SERVICE_A_IMG ?= harbor.act.buaa.edu.cn/jiayuke/example1-servicea:v0.1.0
+EXAMPLE1_SERVICE_B_IMG ?= harbor.act.buaa.edu.cn/jiayuke/example1-serviceb:v0.1.0
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -105,6 +105,11 @@ docker-push: ## Push docker image with the manager.
 	docker push ${IMG}
 	docker push ${ID_GENERATOR_IMG}
 
+.PHONY: docker-push-example1
+docker-push-example1: ## Build docker image with the manager|idgenerator.
+	docker push ${EXAMPLE1_SERVICE_A_IMG}
+	docker push ${EXAMPLE1_SERVICE_B_IMG}
+
 ##@ Deployment
 
 ifndef ignore-not-found
@@ -121,7 +126,8 @@ uninstall: manifests kustomize ## Uninstall CRDs from the K8s cluster specified 
 
 .PHONY: deploy
 deploy: manifests kustomize ## Deploy controller to the K8s cluster specified in ~/.kube/config.
-	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG} idgenerator=${ID_GENERATOR_IMG}
+	cd config/manager && $(KUSTOMIZE) edit set image controller=${IMG}
+	cd config/idgenerator && $(KUSTOMIZE) edit set image idgenerator=${ID_GENERATOR_IMG}
 	$(KUSTOMIZE) build config/default | kubectl apply -f -
 
 .PHONY: deploy-example1

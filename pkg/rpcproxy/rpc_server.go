@@ -20,7 +20,7 @@ import (
 type RpcProxy interface {
 	Start()
 	RegisterService(rcvr interface{}) error
-	RegisterMethod(rcvr interface{}, methodName string, fn manager.RpcMethodFunc) error
+	RegisterMethod(rcvr interface{}, methodName string, fn manager.RpcMethodFunc, callback bool) error
 	RegisterState(rcvr interface{}) error
 	RegisterFields(rcvr interface{}, fieldNames ...string) error
 }
@@ -36,6 +36,7 @@ type rpcProxy struct {
 	ServiceInputCh map[string]chan manager.ReqMsg
 	RequestMsgs    map[int64][]manager.ReqMsg
 	IdGenClient    pb.IdGeneratorClient
+	Mode           manager.CheckpointMode
 }
 
 func NewProxy(serverName string, port int) RpcProxy {
@@ -48,6 +49,7 @@ func NewProxy(serverName string, port int) RpcProxy {
 	s.Mutex = sync.RWMutex{}
 	s.ServiceInputCh = make(map[string]chan manager.ReqMsg)
 	s.RequestMsgs = make(map[int64][]manager.ReqMsg)
+	s.Mode = manager.CheckpointMode(config.GetIntEnv(config.EnvCheckpointMode))
 	conn, err := grpc.Dial(config.GetStringEnv(config.EnvIdGeneratorHost), grpc.WithInsecure())
 	if err != nil {
 		slog.Fatalf("connect to IdGenerator failed, err: %v", err.Error())
@@ -78,13 +80,13 @@ func (s *rpcProxy) RegisterService(rcvr interface{}) error {
 		return nil
 	}
 	s.ServiceInputCh[serviceName] = make(chan manager.ReqMsg)
-	err := s.ServiceManager.RegisterService(rcvr, s.ServiceInputCh[serviceName], s.StateManager.Checkpoint)
+	err := s.ServiceManager.RegisterService(rcvr, s.ServiceInputCh[serviceName], s.StateManager.Checkpoint, s.Mode)
 	return err
 }
 
-func (s *rpcProxy) RegisterMethod(rcvr interface{}, methodName string, fn manager.RpcMethodFunc) error {
+func (s *rpcProxy) RegisterMethod(rcvr interface{}, methodName string, fn manager.RpcMethodFunc, callback bool) error {
 	serviceName := reflect.TypeOf(rcvr).Elem().Name()
-	err := s.ServiceManager.RegisterMethod(serviceName, methodName, fn)
+	err := s.ServiceManager.RegisterMethod(serviceName, methodName, fn, callback)
 	return err
 }
 

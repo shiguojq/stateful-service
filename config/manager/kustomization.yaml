@@ -12,8 +12,5 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 images:
 - name: controller
-  newName: controller
-  newTag: latest
-- name: idgenerator
-  newName: idgenerator
-  newTag: latest
+  newName: harbor.act.buaa.edu.cn/jiayuke/microservice-controller
+  newTag: v0.1.1

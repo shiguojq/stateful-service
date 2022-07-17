@@ -95,11 +95,11 @@ func main() {
 		slog.Errorf("[ServiceA] register service failed, err: %v", err)
 		return
 	}
-	if err := proxy.RegisterMethod(svc, "AddNum", svc.AddNum); err != nil {
+	if err := proxy.RegisterMethod(svc, "AddNum", svc.AddNum, false); err != nil {
 		slog.Errorf("[ServiceA] register method %v failed, err: %v", "AddNum", err)
 		return
 	}
-	if err := proxy.RegisterMethod(svc, "AddNumCallback", svc.AddNumCallback); err != nil {
+	if err := proxy.RegisterMethod(svc, "AddNumCallback", svc.AddNumCallback, true); err != nil {
 		slog.Errorf("[ServiceA] register method %v failed, err: %v", "AddNumCallback", err)
 		return
 	}

@@ -4,16 +4,16 @@ import (
 	"fmt"
 	"github.com/golang/protobuf/proto"
 	"reflect"
-	pb "stateful-service/proto/pb"
 	"stateful-service/slog"
 	"stateful-service/utils"
+	"sync"
 	"sync/atomic"
 )
 
 type ServiceManager interface {
 	RunService(serviceName string) error
-	RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn CheckpointFn) error
-	RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc) error
+	RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn CheckpointFn, mode CheckpointMode) error
+	RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc, callback bool) error
 }
 
 type serviceManager struct {
@@ -28,7 +28,7 @@ func NewServiceManager(sourceHost string) ServiceManager {
 	return manager
 }
 
-func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn CheckpointFn) error {
+func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg, fn CheckpointFn, mode CheckpointMode) error {
 	receiver := reflect.ValueOf(rcvr)
 	if receiver.Kind() != reflect.Ptr {
 		slog.Errorf("[rpcProxy.manager.serviceManager.RegisterService]: receiver expected kind %v, actual kind %v", reflect.Ptr, receiver.Kind())
@@ -46,8 +46,11 @@ func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg, 
 			inputCh:           inputCh,
 			checkpointFn:      fn,
 			checkpointCh:      make(chan string, 1),
-			BlockedMethod:     utils.NewStringSet(),
+			checkpointMode:    mode,
+			blockedMethod:     utils.NewStringSet(),
 			methodSet:         utils.NewStringSet(),
+			callMethod:        utils.NewStringSet(),
+			callbackMethod:    utils.NewStringSet(),
 			registeredMethods: make(map[string]*RpcMethod),
 		}
 	}
@@ -55,8 +58,8 @@ func (m *serviceManager) RegisterService(rcvr interface{}, inputCh chan ReqMsg, 
 	return nil
 }
 
-func (m *serviceManager) RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc) error {
-	return m.RegisteredServices[serviceName].registerMethod(methodName, fn)
+func (m *serviceManager) RegisterMethod(serviceName string, methodName string, fn RpcMethodFunc, callback bool) error {
+	return m.RegisteredServices[serviceName].registerMethod(methodName, fn, callback)
 }
 
 func (m *serviceManager) RunService(serviceName string) error {
@@ -71,16 +74,27 @@ func (m *serviceManager) RunService(serviceName string) error {
 }
 
 type service struct {
-	name              string
-	typ               reflect.Type
-	rcvr              reflect.Value
-	sourceHost        string
-	inputCh           chan ReqMsg
-	running           int32
+	// meta info
+	name       string
+	typ        reflect.Type
+	rcvr       reflect.Value
+	inputCh    chan ReqMsg
+	sourceHost string
+	// running state
+	running     int32
+	blocking    int32
+	logging     int32
+	recordCount int32
+	// checkpoint state
 	checkpointFn      CheckpointFn
-	methodSet         utils.StringSet
 	checkpointCh      chan string
-	BlockedMethod     utils.StringSet
+	checkpointMode    CheckpointMode
+	checkpointReplyCh chan ReplyMsg
+	// method set
+	methodSet         utils.StringSet //full method set
+	blockedMethod     utils.StringSet //blocked method set
+	callMethod        utils.StringSet //direct call method set {full set} - {call set} = {callback set}
+	callbackMethod    utils.StringSet //callback method set
 	registeredMethods map[string]*RpcMethod
 }
 
@@ -101,24 +115,56 @@ func (svc *service) run() {
 	}
 	go func() {
 		for msg := range svc.inputCh {
+			slog.Infof("[RpcService %v] msg %+v start wait", svc.name, msg)
+			svc.waitBlock()
+			if msg.Type == CheckpointReq && svc.checkpointReplyCh == nil {
+				svc.checkpointReplyCh = msg.ReplyCh
+			}
+			if atomic.LoadInt32(&svc.logging) == 1 {
+				atomic.AddInt32(&svc.recordCount, 1)
+			}
+			slog.Infof("[RpcService %v] get msg %+v", svc.name, msg)
 			methodName := msg.MethodName
 			svc.registeredMethods[methodName].InputCh <- msg
 		}
 	}()
-	go svc.waitCheckpoint()
+	switch svc.checkpointMode {
+	case MicroServiceCheckpoint:
+		{
+			go svc.waitMicroServiceCheckpoint()
+		}
+	case ChandyLamportCheckpoint:
+		{
+			go svc.waitLamportCheckpoint()
+		}
+	case FlinkCheckpoint:
+		{
+			go svc.waitFlinkCheckpoint()
+		}
+	}
+
 }
 
-func (svc *service) waitCheckpoint() {
+func (svc *service) waitBlock() {
+	switch svc.checkpointMode {
+	case MicroServiceCheckpoint:
+		return
+	case FlinkCheckpoint:
+		for atomic.LoadInt32(&svc.blocking) == 1 {
+		}
+	}
+}
+
+func (svc *service) waitMicroServiceCheckpoint() {
 	for methodName := range svc.checkpointCh {
-		if svc.BlockedMethod.Has(methodName) {
+		if svc.blockedMethod.Has(methodName) {
 			continue
 		}
-
-		svc.BlockedMethod.Insert(methodName)
-		if svc.BlockedMethod.Len() == svc.methodSet.Len() {
+		svc.blockedMethod.Insert(methodName)
+		if svc.blockedMethod.Len() == svc.methodSet.Len() {
 			checkpoint := svc.checkpointFn(svc.name)
 			slog.Infof("service %s take checkpoint successfully, checkpoint content: %v", svc.name, checkpoint)
-			svc.BlockedMethod = utils.NewStringSet()
+			svc.blockedMethod = utils.NewStringSet()
 			for _, method := range svc.registeredMethods {
 				method.BlockCh <- struct{}{}
 			}
@@ -126,151 +172,92 @@ func (svc *service) waitCheckpoint() {
 	}
 }
 
-func (svc *service) registerMethod(methodName string, fn RpcMethodFunc) error {
+func (svc *service) waitLamportCheckpoint() {
+
+}
+
+func (svc *service) waitFlinkCheckpoint() {
+	for methodName := range svc.checkpointCh {
+		if svc.blockedMethod.Has(methodName) {
+			continue
+		}
+		svc.blockedMethod.Insert(methodName)
+		if atomic.LoadInt32(&svc.blocking) == 0 &&
+			atomic.LoadInt32(&svc.logging) == 0 &&
+			svc.callMethod.Less(svc.blockedMethod) {
+			atomic.StoreInt32(&svc.blocking, 1)
+			wg := sync.WaitGroup{}
+			for callbackMethod := range svc.callbackMethod {
+				if !svc.blockedMethod.Has(callbackMethod) {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						svc.registeredMethods[callbackMethod].InputCh <- ReqMsg{
+							Type: BlockReq,
+						}
+					}()
+				}
+			}
+			wg.Wait()
+			checkpoint := svc.checkpointFn(svc.name)
+			atomic.StoreInt32(&svc.logging, 1)
+			atomic.StoreInt32(&svc.recordCount, 0)
+			slog.Infof("[RpcService %v] take checkpoint successfully, checkpoint content: %v", svc.name, checkpoint)
+			for _, method := range svc.registeredMethods {
+				if !svc.blockedMethod.Has(method.Name) {
+					slog.Infof("[RpcService %v] start method %v", svc.name, method.Name)
+					method.BlockCh <- struct{}{}
+					slog.Infof("[RpcService %v] start method %v success", svc.name, method.Name)
+				}
+			}
+			atomic.StoreInt32(&svc.blocking, 0)
+		}
+		if atomic.LoadInt32(&svc.logging) == 1 && svc.blockedMethod.Equals(svc.methodSet) {
+			svc.blockedMethod = utils.NewStringSet()
+			count := atomic.LoadInt32(&svc.recordCount)
+			atomic.StoreInt32(&svc.recordCount, 0)
+			atomic.StoreInt32(&svc.logging, 0)
+			svc.checkpointReplyCh <- ReplyMsg{
+				Ok:    true,
+				Reply: nil,
+			}
+			svc.checkpointReplyCh = nil
+			slog.Infof("[RpcService %v] record request message %v", svc.name, count)
+		}
+	}
+}
+
+func (svc *service) registerMethod(methodName string, fn RpcMethodFunc, callback bool) error {
 	if svc.methodSet.Has(methodName) {
 		return nil
 	}
 	svc.methodSet.Insert(methodName)
+	if svc.checkpointMode == FlinkCheckpoint {
+		if callback {
+			svc.callbackMethod.Insert(methodName)
+		} else {
+			svc.callMethod.Insert(methodName)
+		}
+	}
 	inputCh := make(chan ReqMsg, 1024)
 	outputCh := make(chan proto.Message, 1)
 	svc.registeredMethods[methodName] = &RpcMethod{
-		ServiceName:   svc.name,
-		Name:          methodName,
-		Fn:            fn,
-		SourceHost:    svc.sourceHost,
-		InputCh:       inputCh,
-		OutputCh:      outputCh,
-		CheckpointCh:  svc.checkpointCh,
-		BlockCh:       make(chan struct{}),
-		ClientManager: NewClientManager(fmt.Sprintf("%v.%v", svc.name, methodName), outputCh),
-		SourceSet:     utils.NewStringSet(),
-		SourceBlocked: make(map[string]bool),
-		TargetSet:     utils.NewStringSet(),
-		BarrierSet:    utils.NewStringSet(),
-		TargetHosts:   make(map[string]string),
+		ServiceName:    svc.name,
+		Name:           methodName,
+		Fn:             fn,
+		SourceHost:     svc.sourceHost,
+		InputCh:        inputCh,
+		OutputCh:       outputCh,
+		CheckpointCh:   svc.checkpointCh,
+		CheckpointMode: svc.checkpointMode,
+		BlockCh:        make(chan struct{}),
+		ClientManager:  NewClientManager(fmt.Sprintf("%v.%v", svc.name, methodName), outputCh),
+		SourceSet:      utils.NewStringSet(),
+		SourceBlocked:  make(map[string]bool),
+		TargetSet:      utils.NewStringSet(),
+		BarrierSet:     utils.NewStringSet(),
+		TargetHosts:    make(map[string]string),
 	}
 	slog.Infof("[rpcProxy.manager.service.registerMethod]: service [%v] register method [%v] successfully", svc.name, methodName)
 	return nil
-}
-
-type RpcMethodFunc func(arg MethodArgs) MethodResult
-
-type RpcMethod struct {
-	ServiceName   string
-	Name          string
-	Fn            RpcMethodFunc
-	SourceHost    string
-	InputCh       chan ReqMsg
-	OutputCh      chan proto.Message
-	ClientManager ClientManager
-	SourceSet     utils.StringSet
-	SourceBlocked map[string]bool
-	TargetSet     utils.StringSet
-	BarrierSet    utils.StringSet
-	TargetHosts   map[string]string
-	CheckpointCh  chan string
-	BlockCh       chan struct{}
-	WaitingCh     chan ReqMsg
-}
-
-func (method *RpcMethod) StartProcess() {
-	slog.Infof("[RpcMethod: %v.%v] start process", method.ServiceName, method.Name)
-	for reqMsg := range method.InputCh {
-		method.processMsg(reqMsg)
-	}
-}
-
-func (method *RpcMethod) processMsg(reqMsg ReqMsg) {
-	slog.Infof("[RpcMethod: %v.%v] get req message %+v", method.ServiceName, method.Name, reqMsg)
-	switch reqMsg.Type {
-	case AsyncReq:
-		source := reqMsg.Source
-		if !method.SourceSet.Has(source) {
-			method.SourceSet.Insert(source)
-			method.SourceBlocked[source] = false
-		}
-		if method.SourceBlocked[source] {
-			method.WaitingCh <- reqMsg
-		}
-
-		args := MethodArgs{
-			Message: reqMsg.Args,
-		}
-
-		result := method.Fn(args)
-		slog.Infof("[RpcMethod: %v.%v] call result: %+v", method.ServiceName, method.Name, result)
-
-		if result.IsRequest {
-			req := &pb.AsyncCallRequest{
-				Id:     reqMsg.Id,
-				Msg:    result.Message,
-				Source: fmt.Sprintf("%s.%s", method.ServiceName, method.Name),
-				// SourceHost: method.SourceHost,
-				SourceHost: method.SourceHost,
-			}
-			if result.Target != "" {
-				req.Target = result.Target
-				req.TargetHost = result.TargetHost
-				req.Callback = result.Callback
-			} else {
-				req.Target = reqMsg.Callback
-				req.TargetHost = reqMsg.SourceHost
-				req.Callback = ""
-			}
-			method.TargetHosts[req.Target] = req.TargetHost
-			if !method.TargetSet.Has(req.Target) {
-				method.TargetSet.Insert(req.Target)
-			}
-			method.OutputCh <- req
-		} else {
-			replyMsg := ReplyMsg{
-				Ok:    true,
-				Reply: result.Message,
-			}
-			reqMsg.ReplyCh <- replyMsg
-		}
-	case CheckpointReq:
-		if method.BarrierSet.Len() == 0 {
-			method.WaitingCh = make(chan ReqMsg, 1024)
-		}
-		source := reqMsg.Source
-		if !method.BarrierSet.Has(source) {
-			method.BarrierSet.Insert(source)
-			method.SourceBlocked[source] = true
-		}
-
-		slog.Infof("[RpcMethod: %v.%v] barrier set: %v, source set: %v", method.ServiceName, method.Name, method.BarrierSet, method.SourceSet)
-
-		if method.BarrierSet.Equals(method.SourceSet) {
-			for target := range method.TargetSet {
-				req := &pb.InitCheckpointRequest{
-					Source:     fmt.Sprintf("%s.%s", method.ServiceName, method.Name),
-					SourceHost: method.SourceHost,
-					Target:     target,
-					TargetHost: method.TargetHosts[target],
-				}
-				method.OutputCh <- req
-			}
-			method.CheckpointCh <- method.Name
-			method.waitCheckpoint()
-			replyMsg := ReplyMsg{
-				Ok:    true,
-				Reply: []byte{},
-			}
-			reqMsg.ReplyCh <- replyMsg
-			for reqMsg := range method.WaitingCh {
-				method.processMsg(reqMsg)
-			}
-		}
-	case RestoreReq:
-	}
-}
-
-func (method *RpcMethod) waitCheckpoint() {
-	<-method.BlockCh
-	close(method.WaitingCh)
-	for source := range method.SourceBlocked {
-		method.SourceBlocked[source] = false
-	}
-	method.BarrierSet = utils.NewStringSet()
 }

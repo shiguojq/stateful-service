@@ -7,6 +7,13 @@ import (
 )
 
 type CheckpointFn func(svcName string) map[string]reflect.Value
+type CheckpointMode int
+
+const (
+	MicroServiceCheckpoint CheckpointMode = iota
+	FlinkCheckpoint
+	ChandyLamportCheckpoint
+)
 
 type StateManager interface {
 	RegisterState(rcvr interface{}) error

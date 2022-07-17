@@ -84,7 +84,7 @@ func init() {
 
 func main() {
 	flag.Parse()
-	proxy := rpcproxy.NewProxy("ServiceB", port)
+	proxy := rpcproxy.NewProxy("serviceb", port)
 	slog.Infof("[ServiceB] create new proxy: %v, running port: %v", "ServiceB", port)
 	svc := &ServiceB{
 		Number: 0,
@@ -94,11 +94,11 @@ func main() {
 		slog.Errorf("[ServiceB] register service failed, err: %v", err)
 		return
 	}
-	if err := proxy.RegisterMethod(svc, "StoreNum", svc.StoreNum); err != nil {
+	if err := proxy.RegisterMethod(svc, "StoreNum", svc.StoreNum, false); err != nil {
 		slog.Errorf("[ServiceB] register method %v failed, err: %v", "AddNum", err)
 		return
 	}
-	if err := proxy.RegisterMethod(svc, "StoreNumCallback", svc.StoreNumCallback); err != nil {
+	if err := proxy.RegisterMethod(svc, "StoreNumCallback", svc.StoreNumCallback, true); err != nil {
 		slog.Errorf("[ServiceB] register method %v failed, err: %v", "AddNumCallback", err)
 		return
 	}

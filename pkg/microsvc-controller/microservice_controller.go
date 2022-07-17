@@ -117,10 +117,6 @@ func (r *MicroServiceReconciler) createPod(ctx context.Context, microSvc *mscv1.
 			Name:  "RUNNING_PORT",
 			Value: fmt.Sprint(microSvc.Spec.Port),
 		},
-		{
-			Name:  "ID_GENERATOR_HOST",
-			Value: "microsvc-controller-idgenerator:8080",
-		},
 	}
 
 	env = append(env, microSvc.Spec.Config...)
@@ -134,20 +130,17 @@ func (r *MicroServiceReconciler) createPod(ctx context.Context, microSvc *mscv1.
 			},
 		},
 		Spec: v1.PodSpec{
-			/*Affinity: &v1.Affinity{
-				PodAffinity: &v1.PodAffinity{
-					PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{
-						{
-							PodAffinityTerm: v1.PodAffinityTerm{
-								LabelSelector: &metav1.LabelSelector{
-									MatchExpressions: []metav1.LabelSelectorRequirement{
-										{
-											Key:      "app",
-											Operator: metav1.LabelSelectorOpIn,
-											Values: []string{
-												microSvc.Spec.Upstream,
-												microSvc.Spec.Downstream,
-											},
+			Affinity: &v1.Affinity{
+				NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{
+							{
+								MatchExpressions: []v1.NodeSelectorRequirement{
+									{
+										Key:      "kubernetes.io/hostname",
+										Operator: v1.NodeSelectorOpNotIn,
+										Values: []string{
+											"jyk1",
 										},
 									},
 								},
@@ -155,7 +148,7 @@ func (r *MicroServiceReconciler) createPod(ctx context.Context, microSvc *mscv1.
 						},
 					},
 				},
-			},*/
+			},
 			Containers: []v1.Container{
 				{
 					Name:            microSvc.Name,
